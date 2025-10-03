@@ -1,11 +1,12 @@
 import sys
 import subprocess
+import re
+from pathlib import Path
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-                             QLabel, QLineEdit, QPushButton, QFileDialog, QMessageBox,
+                             QLabel, QPushButton, QFileDialog, QMessageBox,
                              QProgressBar, QGroupBox)
 from PyQt6.QtCore import QThread, pyqtSignal, Qt
-from PyQt6.QtGui import QFont, QAction, QIcon
-from pathlib import Path
+from PyQt6.QtGui import QFont
 
 class ConversionThread(QThread):
     progress_updated = pyqtSignal(int)
@@ -15,90 +16,136 @@ class ConversionThread(QThread):
         super().__init__()
         self.input_file = input_file
         self.output_file = output_file
-        self.mode = mode  # 'convert' or 'compress'
+        self.mode = mode
+        self._is_running = True
     
+    def _get_ffmpeg_command(self):
+        """Genera el comando FFmpeg según el modo y formato"""
+        if self.mode == 'convert':
+            return [
+                "ffmpeg", "-i", self.input_file,
+                "-c:v", "libx264", "-crf", "18", "-preset", "slow",
+                "-c:a", "aac", "-b:a", "192k", self.output_file, "-y"
+            ]
+        
+        # Configuraciones para compresión por formato
+        codec_configs = {
+            '.mp4': {"vcodec": "libx264", "crf": "23", "preset": "medium", "acodec": "aac", "audio_bitrate": "128k"},
+            '.webm': {"vcodec": "libvpx-vp9", "crf": "30", "preset": "", "acodec": "libopus", "audio_bitrate": "96k"},
+            '.mov': {"vcodec": "libx264", "crf": "23", "preset": "medium", "acodec": "aac", "audio_bitrate": "128k"},
+            '.mkv': {"vcodec": "libx264", "crf": "23", "preset": "medium", "acodec": "aac", "audio_bitrate": "128k"},
+            '.avi': {"vcodec": "mpeg4", "qscale": "5", "preset": "", "acodec": "mp3", "audio_bitrate": "128k"}
+        }
+        
+        output_ext = Path(self.output_file).suffix.lower()
+        config = codec_configs.get(output_ext, codec_configs['.mp4'])
+        
+        cmd = ["ffmpeg", "-i", self.input_file]
+        
+        if 'qscale' in config:  # Para AVI
+            cmd.extend(["-c:v", config["vcodec"], "-qscale:v", config["qscale"]])
+        else:
+            cmd.extend(["-c:v", config["vcodec"], "-crf", config["crf"]])
+            if config["preset"]:
+                cmd.extend(["-preset", config["preset"]])
+        
+        cmd.extend(["-c:a", config["acodec"], "-b:a", config["audio_bitrate"], self.output_file, "-y"])
+        
+        return cmd
+
+    def _parse_duration(self, duration_str):
+        """Convierte string de duración (hh:mm:ss.ms) a segundos totales"""
+        try:
+            parts = duration_str.split(':')
+            if len(parts) == 3:
+                hours, minutes, seconds = parts
+                seconds_parts = seconds.split('.')
+                sec = float(seconds_parts[0])
+                if len(seconds_parts) > 1:
+                    sec += float(f"0.{seconds_parts[1]}")
+                return float(hours) * 3600 + float(minutes) * 60 + sec
+            return 0
+        except:
+            return 0
+
+    def _parse_progress(self, line, total_duration):
+        """Parsea la línea de progreso de FFmpeg y retorna el porcentaje"""
+        # Buscar el tiempo actual en el formato time=hh:mm:ss.ms
+        time_match = re.search(r'time=(\d+:\d+:\d+\.\d+)', line)
+        if time_match and total_duration > 0:
+            current_time = self._parse_duration(time_match.group(1))
+            progress = int((current_time / total_duration) * 100)
+            return min(progress, 100)
+        return None
+
     def run(self):
         try:
-            if self.mode == 'convert':
-                # CONVERTIR a MP4 (igual que antes)
-                cmd = [
-                    "ffmpeg", "-i", self.input_file,
-                    "-c:v", "libx264", "-crf", "18", "-preset", "slow",
-                    "-c:a", "aac", "-b:a", "192k", self.output_file
-                ]
-            else:  # COMPRIMIR (mantener formato original)
-                # Obtener la extensión del archivo de salida
-                output_ext = Path(self.output_file).suffix.lower()
-                
-                # Configurar codecs según el formato de salida
-                if output_ext == '.mp4':
-                    cmd = [
-                        "ffmpeg", "-i", self.input_file,
-                        "-c:v", "libx264", "-crf", "23", "-preset", "medium",
-                        "-c:a", "aac", "-b:a", "128k", self.output_file
-                    ]
-                elif output_ext == '.webm':
-                    cmd = [
-                        "ffmpeg", "-i", self.input_file,
-                        "-c:v", "libvpx-vp9", "-crf", "30", "-b:v", "0",
-                        "-c:a", "libopus", "-b:a", "96k", self.output_file
-                    ]
-                elif output_ext == '.mov':
-                    cmd = [
-                        "ffmpeg", "-i", self.input_file,
-                        "-c:v", "libx264", "-crf", "23", "-preset", "medium",
-                        "-c:a", "aac", "-b:a", "128k", self.output_file
-                    ]
-                elif output_ext == '.mkv':
-                    cmd = [
-                        "ffmpeg", "-i", self.input_file,
-                        "-c:v", "libx264", "-crf", "23", "-preset", "medium",
-                        "-c:a", "aac", "-b:a", "128k", self.output_file
-                    ]
-                elif output_ext == '.avi':
-                    cmd = [
-                        "ffmpeg", "-i", self.input_file,
-                        "-c:v", "mpeg4", "-qscale:v", "5",
-                        "-c:a", "mp3", "-b:a", "128k", self.output_file
-                    ]
+            cmd = self._get_ffmpeg_command()
+            
+            # Primero obtener la duración del video
+            probe_cmd = [
+                "ffprobe", "-v", "error", "-show_entries", 
+                "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", 
+                self.input_file
+            ]
+            
+            total_duration = 0
+            try:
+                result = subprocess.run(probe_cmd, capture_output=True, text=True, check=True)
+                total_duration = float(result.stdout.strip())
+            except:
+                # Si no podemos obtener la duración, usar progreso simulado
+                total_duration = 0
+
+            process = subprocess.Popen(
+                cmd, 
+                stderr=subprocess.PIPE, 
+                stdout=subprocess.PIPE,
+                universal_newlines=True,
+                bufsize=1
+            )
+
+            # Monitorear el progreso en tiempo real
+            while self._is_running:
+                line = process.stderr.readline()
+                if not line:
+                    break
+                    
+                if total_duration > 0:
+                    progress = self._parse_progress(line, total_duration)
+                    if progress is not None:
+                        self.progress_updated.emit(progress)
                 else:
-                    # Por defecto, usar H.264
-                    cmd = [
-                        "ffmpeg", "-i", self.input_file,
-                        "-c:v", "libx264", "-crf", "23", "-preset", "medium",
-                        "-c:a", "aac", "-b:a", "128k", self.output_file
-                    ]
-            
-            process = subprocess.Popen(cmd, stderr=subprocess.PIPE, universal_newlines=True)
-            
-            # Simular progreso
-            for i in range(101):
-                self.progress_updated.emit(i)
-                self.msleep(50)
-                
+                    # Progreso simulado como fallback
+                    current_progress = self.progress_bar.value() if hasattr(self, 'progress_bar') else 0
+                    if current_progress < 90:
+                        self.progress_updated.emit(current_progress + 1)
+
             process.wait()
             
             if process.returncode == 0:
+                self.progress_updated.emit(100)
                 self.finished_signal.emit(True, f"Proceso completado exitosamente!\n{self.output_file}")
             else:
-                error_output = process.stderr.read()
-                self.finished_signal.emit(False, f"Error en el proceso. Código: {process.returncode}\n{error_output}")
-                
+                self.finished_signal.emit(False, f"Error en el proceso. Código: {process.returncode}")
+
         except Exception as e:
             self.finished_signal.emit(False, f"Error: {str(e)}")
+
+    def stop(self):
+        """Detener el proceso de conversión"""
+        self._is_running = False
 
 class VideoConverterApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.initUI()
         self.conversion_thread = None
+        self.last_action_mode = None  # Para trackear el último modo usado
+        self.initUI()
     
     def initUI(self):
         self.setWindowTitle("Video Converter Pro - PyQt6")
         self.setMinimumSize(650, 450)
-        
-        # Crear menú
-        self.create_menu()
         
         # Widget central
         central_widget = QWidget()
@@ -109,314 +156,207 @@ class VideoConverterApp(QMainWindow):
         layout.setSpacing(15)
         layout.setContentsMargins(25, 25, 25, 25)
         
-        # Título
+        # Crear elementos de la UI
+        self._create_title_section(layout)
+        self._create_file_section(layout)
+        self._create_action_section(layout)
+        self._create_progress_section(layout)
+        
+        # Espacio flexible
+        layout.addStretch()
+    
+    def _create_title_section(self, layout):
+        """Crea la sección de título"""
         title = QLabel("🎬 Video Converter Pro")
         title.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet("color: #E0E0E0; margin-bottom: 10px;")
         layout.addWidget(title)
         
-        # Subtítulo
         subtitle = QLabel("Convierte y comprime videos con calidad profesional")
         subtitle.setFont(QFont("Segoe UI", 10))
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         subtitle.setStyleSheet("color: #B0B0B0; margin-bottom: 20px;")
         layout.addWidget(subtitle)
-        
-        # Grupo de entrada/salida
-        io_group = QGroupBox("Configuración de Archivos")
-        io_group.setStyleSheet("""
+    
+    def _create_styled_group(self, title):
+        """Crea un grupo con estilo consistente"""
+        group = QGroupBox(title)
+        group.setStyleSheet("""
             QGroupBox {
-                font-weight: bold;
-                font-size: 12px;
-                margin-top: 10px;
-                color: #CCCCCC;
-                border: 1px solid #555555;
-                border-radius: 6px;
-                padding-top: 10px;
+                font-weight: bold; font-size: 12px; margin-top: 10px;
+                color: #CCCCCC; border: 1px solid #555555;
+                border-radius: 6px; padding-top: 10px;
             }
             QGroupBox::title {
-                subcontrol-origin: margin;
-                padding: 0 8px;
+                subcontrol-origin: margin; padding: 0 8px;
                 background-color: #2D2D2D;
             }
         """)
+        return group
+    
+    def _create_file_row(self, label_text, display_text, button_text, button_slot):
+        """Crea una fila para selección de archivos"""
+        layout = QHBoxLayout()
+        
+        label = QLabel(label_text)
+        label.setFixedWidth(120)
+        label.setFont(QFont("Segoe UI", 10))
+        label.setStyleSheet("color: #CCCCCC;")
+        
+        display = QLabel(display_text)
+        display.setStyleSheet("""
+            QLabel {
+                padding: 8px; background-color: #404040; color: #888888;
+                border: 1px solid #555555; border-radius: 4px; min-height: 15px;
+            }
+        """)
+        display.setMinimumHeight(35)
+        
+        button = QPushButton(button_text)
+        button.setStyleSheet(self._get_button_style("#3498DB"))
+        button.clicked.connect(button_slot)
+        
+        layout.addWidget(label)
+        layout.addWidget(display)
+        layout.addWidget(button)
+        
+        return layout, display, button
+    
+    def _create_file_section(self, layout):
+        """Crea la sección de selección de archivos"""
+        io_group = self._create_styled_group("Configuración de Archivos")
         io_layout = QVBoxLayout(io_group)
         
         # Entrada de video
-        input_layout = QHBoxLayout()
-        self.input_label = QLabel("Video de entrada:")
-        self.input_label.setFixedWidth(120)
-        self.input_label.setFont(QFont("Segoe UI", 10))
-        self.input_label.setStyleSheet("color: #CCCCCC;")
-        
-        self.input_display = QLabel("Selecciona un archivo de video...")
-        self.input_display.setStyleSheet("""
-            QLabel {
-                padding: 8px;
-                background-color: #404040;
-                color: #888888;
-                border: 1px solid #555555;
-                border-radius: 4px;
-                min-height: 15px;
-            }
-        """)
-        self.input_display.setMinimumHeight(35)
-        
-        self.input_browse = QPushButton("Examinar")
-        self.input_browse.setStyleSheet(self.get_button_style("#3498DB"))
-        self.input_browse.clicked.connect(self.select_input_file)
-        
-        input_layout.addWidget(self.input_label)
-        input_layout.addWidget(self.input_display)
-        input_layout.addWidget(self.input_browse)
+        input_layout, self.input_display, self.input_browse = self._create_file_row(
+            "Video de entrada:", "Selecciona un archivo de video...", "Examinar", self.select_input_file
+        )
         io_layout.addLayout(input_layout)
         
         # Salida de video
-        output_layout = QHBoxLayout()
-        self.output_label = QLabel("Video de salida:")
-        self.output_label.setFixedWidth(120)
-        self.output_label.setFont(QFont("Segoe UI", 10))
-        self.output_label.setStyleSheet("color: #CCCCCC;")
-        
-        self.output_display = QLabel("Selecciona destino con 'Guardar como'...")
-        self.output_display.setStyleSheet("""
-            QLabel {
-                padding: 8px;
-                background-color: #404040;
-                color: #888888;
-                border: 1px solid #555555;
-                border-radius: 4px;
-                min-height: 15px;
-            }
-        """)
-        self.output_display.setMinimumHeight(35)
-        
-        self.output_browse = QPushButton("Guardar como")
-        self.output_browse.setStyleSheet(self.get_button_style("#3498DB"))
-        self.output_browse.clicked.connect(self.select_output_file)
-        
-        output_layout.addWidget(self.output_label)
-        output_layout.addWidget(self.output_display)
-        output_layout.addWidget(self.output_browse)
+        output_layout, self.output_display, self.output_browse = self._create_file_row(
+            "Video de salida:", "Selecciona destino con 'Guardar como'...", "Guardar como", self.select_output_file
+        )
         io_layout.addLayout(output_layout)
         
         layout.addWidget(io_group)
-        
-        # Grupo de acciones
-        action_group = QGroupBox("Acciones")
-        action_group.setStyleSheet("""
-            QGroupBox {
-                font-weight: bold;
-                font-size: 12px;
-                margin-top: 10px;
-                color: #CCCCCC;
-                border: 1px solid #555555;
-                border-radius: 6px;
-                padding-top: 10px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                padding: 0 8px;
-                background-color: #2D2D2D;
-            }
-        """)
+    
+    def _create_action_section(self, layout):
+        """Crea la sección de botones de acción"""
+        action_group = self._create_styled_group("Acciones")
         action_layout = QHBoxLayout(action_group)
         
         # Botones de acción
         self.convert_btn = QPushButton("🎥 Convertir a MP4")
-        self.convert_btn.setStyleSheet(self.get_button_style("#2E86AB", hover="#1B6B93"))
-        self.convert_btn.clicked.connect(self.convert_to_mp4)
-        self.convert_btn.setToolTip("Convierte cualquier formato de video a MP4 con alta calidad")
-        
         self.compress_btn = QPushButton("📦 Comprimir Video")
-        self.compress_btn.setStyleSheet(self.get_button_style("#28A745", hover="#1E7E34"))
-        self.compress_btn.clicked.connect(self.compress_video)
-        self.compress_btn.setToolTip("Comprime el video manteniendo el mismo formato (reduce tamaño sin cambiar formato)")
+        self.cancel_btn = QPushButton("❌ Cancelar")
         
-        action_layout.addWidget(self.convert_btn)
-        action_layout.addWidget(self.compress_btn)
+        for btn, color, hover, slot, tooltip, visible in [
+            (self.convert_btn, "#2E86AB", "#1B6B93", self.convert_to_mp4, 
+             "Convierte cualquier formato de video a MP4 (extensión .mp4 automática)", True),
+            (self.compress_btn, "#28A745", "#1E7E34", self.compress_video,
+             "Comprime el video manteniendo el mismo formato del archivo original", True),
+            (self.cancel_btn, "#E74C3C", "#C0392B", self.cancel_conversion,
+             "Cancela la conversión en curso", False)
+        ]:
+            btn.setStyleSheet(self._get_button_style(color, hover))
+            btn.clicked.connect(slot)
+            btn.setToolTip(tooltip)
+            btn.setVisible(visible)
+            action_layout.addWidget(btn)
+        
         layout.addWidget(action_group)
-        
-        # Barra de progreso
+    
+    def _create_progress_section(self, layout):
+        """Crea la sección de progreso y estado"""
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
         self.progress_bar.setStyleSheet("""
             QProgressBar {
-                border: 1px solid #555555;
-                border-radius: 5px;
-                text-align: center;
-                height: 15px;
-                background-color: #404040;
-                color: #E0E0E0;
+                border: 1px solid #555555; border-radius: 5px; text-align: center;
+                height: 15px; background-color: #404040; color: #E0E0E0;
             }
             QProgressBar::chunk {
-                background-color: #3498DB;
-                border-radius: 4px;
+                background-color: #3498DB; border-radius: 4px;
             }
         """)
         layout.addWidget(self.progress_bar)
         
-        # Estado
         self.status_label = QLabel("Listo para convertir videos")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.status_label.setStyleSheet("color: #B0B0B0; font-style: italic; margin-top: 10px;")
         layout.addWidget(self.status_label)
-        
-        # Espacio flexible
-        layout.addStretch()
     
-    def get_button_style(self, color, hover=None):
+    def _get_button_style(self, color, hover=None):
+        """Retorna el estilo CSS para botones"""
         if hover is None:
             hover = color
         return f"""
             QPushButton {{
-                background-color: {color};
-                color: white;
-                border: none;
-                padding: 10px 15px;
-                border-radius: 5px;
-                font-weight: bold;
-                font-size: 11px;
+                background-color: {color}; color: white; border: none;
+                padding: 10px 15px; border-radius: 5px;
+                font-weight: bold; font-size: 11px;
             }}
-            QPushButton:hover {{
-                background-color: {hover};
-            }}
+            QPushButton:hover {{ background-color: {hover}; }}
             QPushButton:disabled {{
-                background-color: #555555;
-                color: #888888;
+                background-color: #555555; color: #888888;
             }}
         """
     
-    def create_menu(self):
-        menubar = self.menuBar()
-        menubar.setStyleSheet("""
-            QMenuBar {
-                background-color: #2D2D2D;
-                color: #E0E0E0;
-                border-bottom: 1px solid #555555;
-            }
-            QMenuBar::item {
-                background-color: transparent;
-                padding: 4px 8px;
-            }
-            QMenuBar::item:selected {
-                background-color: #404040;
-            }
-            QMenu {
-                background-color: #2D2D2D;
-                color: #E0E0E0;
-                border: 1px solid #555555;
-            }
-            QMenu::item {
-                padding: 4px 20px;
-            }
-            QMenu::item:selected {
-                background-color: #404040;
+    def _update_display_style(self, display_widget):
+        """Actualiza el estilo del display cuando tiene contenido válido"""
+        display_widget.setStyleSheet("""
+            QLabel {
+                padding: 8px; background-color: #404040; color: #E0E0E0;
+                border: 1px solid #555555; border-radius: 4px; min-height: 15px;
             }
         """)
-        
-        # Menú Archivo
-        file_menu = menubar.addMenu('&Archivo')
-        
-        new_action = QAction('&Nuevo', self)
-        new_action.setShortcut('Ctrl+N')
-        file_menu.addAction(new_action)
-        
-        open_action = QAction('&Abrir', self)
-        open_action.setShortcut('Ctrl+O')
-        file_menu.addAction(open_action)
-        
-        file_menu.addSeparator()
-        
-        exit_action = QAction('&Salir', self)
-        exit_action.setShortcut('Ctrl+Q')
-        exit_action.triggered.connect(self.close)
-        file_menu.addAction(exit_action)
-        
-        # Menú Ayuda
-        help_menu = menubar.addMenu('&Ayuda')
-        
-        about_action = QAction('&Acerca de', self)
-        about_action.triggered.connect(self.show_about)
-        help_menu.addAction(about_action)
-    
-    def show_about(self):
-        about_box = QMessageBox(self)
-        about_box.setWindowTitle("Acerca de Video Converter Pro")
-        about_box.setText("Video Converter Pro v1.0\n\n"
-                         "Una aplicación profesional para conversión y compresión de videos.\n"
-                         "Desarrollado con PyQt6 y FFmpeg.")
-        about_box.setStyleSheet("""
-            QMessageBox {
-                background-color: #2D2D2D;
-                color: #E0E0E0;
-            }
-            QMessageBox QLabel {
-                color: #E0E0E0;
-            }
-            QMessageBox QPushButton {
-                background-color: #3498DB;
-                color: white;
-                border: none;
-                padding: 8px 15px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QMessageBox QPushButton:hover {
-                background-color: #2980B9;
-            }
-        """)
-        about_box.exec()
-    
+
     def select_input_file(self):
         file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Seleccionar video",
-            str(Path.home()),
+            self, "Seleccionar video", str(Path.home()),
             "Archivos de video (*.mp4 *.webm *.mov *.mkv *.avi);;Todos los archivos (*.*)"
         )
         if file_path:
             self.input_display.setText(file_path)
-            self.input_display.setStyleSheet("""
-                QLabel {
-                    padding: 8px;
-                    background-color: #404040;
-                    color: #E0E0E0;
-                    border: 1px solid #555555;
-                    border-radius: 4px;
-                    min-height: 15px;
-                }
-            """)
+            self._update_display_style(self.input_display)
     
     def select_output_file(self):
         input_file = self.input_display.text()
         
-        # Si hay un archivo de entrada, sugerir la misma extensión
-        if input_file and input_file != "Selecciona un archivo de video...":
-            input_ext = Path(input_file).suffix
-            default_name = str(Path.home() / f"compressed_video{input_ext}")
+        # Determinar la extensión por defecto basada en el último modo usado
+        if self.last_action_mode == 'convert':
+            default_ext = ".mp4"
+        elif self.last_action_mode == 'compress':
+            if input_file and input_file != "Selecciona un archivo de video...":
+                default_ext = Path(input_file).suffix
+            else:
+                default_ext = ".mp4"
         else:
-            default_name = str(Path.home() / "converted_video.mp4")
+            default_ext = ".mp4"  # Por defecto
+        
+        default_name = str(Path.home() / f"converted_video{default_ext}")
+        
+        # Filtro dinámico basado en el modo
+        if self.last_action_mode == 'convert':
+            file_filter = "Archivos MP4 (*.mp4);;Todos los archivos (*.*)"
+        else:
+            file_filter = "Archivos de video (*.mp4 *.webm *.mov *.mkv *.avi);;Todos los archivos (*.*)"
         
         file_path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Guardar video como",
-            default_name,
-            "Archivos de video (*.mp4 *.webm *.mov *.mkv *.avi);;Todos los archivos (*.*)"
+            self, "Guardar video como", default_name, file_filter
         )
+        
         if file_path:
+            # Asegurar la extensión correcta basada en el último modo
+            if self.last_action_mode == 'convert':
+                file_path = str(Path(file_path).with_suffix('.mp4'))
+            elif self.last_action_mode == 'compress' and input_file and input_file != "Selecciona un archivo de video...":
+                file_path = str(Path(file_path).with_suffix(Path(input_file).suffix))
+            
             self.output_display.setText(file_path)
-            self.output_display.setStyleSheet("""
-                QLabel {
-                    padding: 8px;
-                    background-color: #404040;
-                    color: #E0E0E0;
-                    border: 1px solid #555555;
-                    border-radius: 4px;
-                    min-height: 15px;
-                }
-            """)
+            self._update_display_style(self.output_display)
     
     def validate_inputs(self):
         input_file = self.input_display.text()
@@ -433,51 +373,70 @@ class VideoConverterApp(QMainWindow):
         return True
     
     def set_ui_processing(self, processing):
-        self.convert_btn.setDisabled(processing)
-        self.compress_btn.setDisabled(processing)
+        """Habilita/deshabilita UI durante el procesamiento"""
+        self.convert_btn.setVisible(not processing)
+        self.compress_btn.setVisible(not processing)
+        self.cancel_btn.setVisible(processing)
         self.input_browse.setDisabled(processing)
         self.output_browse.setDisabled(processing)
         self.progress_bar.setVisible(processing)
+
+    def cancel_conversion(self):
+        """Cancela la conversión en curso"""
+        if self.conversion_thread and self.conversion_thread.isRunning():
+            self.conversion_thread.stop()
+            self.conversion_thread.terminate()
+            self.conversion_thread.wait()
+            self.status_label.setText("Conversión cancelada")
+            self.set_ui_processing(False)
     
     def convert_to_mp4(self):
-        """Convierte cualquier formato de video a MP4 con alta calidad"""
         if self.validate_inputs():
+            # Forzar extensión .mp4
+            input_file = self.input_display.text()
+            output_file = self.output_display.text()
+            output_file_mp4 = str(Path(output_file).with_suffix('.mp4'))
+            
+            if output_file != output_file_mp4:
+                self.output_display.setText(output_file_mp4)
+                self._update_display_style(self.output_display)
+            
+            self.last_action_mode = 'convert'
             self.start_conversion('convert')
     
     def compress_video(self):
-        """Comprime el video manteniendo el formato original"""
         if not self.validate_inputs():
             return
         
         input_file = self.input_display.text()
         output_file = self.output_display.text()
         
-        # Validar que los formatos de entrada y salida sean iguales
+        # Mantener la misma extensión que el archivo de entrada
         input_ext = Path(input_file).suffix.lower()
-        output_ext = Path(output_file).suffix.lower()
+        output_file_same_ext = str(Path(output_file).with_suffix(input_ext))
         
-        if input_ext != output_ext:
-            reply = QMessageBox.question(
-                self, 
-                "Confirmar compresión", 
-                f"Estás cambiando el formato de {input_ext} a {output_ext}. "
-                f"¿Deseas comprimir manteniendo el formato original ({input_ext})?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
-                QMessageBox.StandardButton.Yes
-            )
-            
-            if reply == QMessageBox.StandardButton.Yes:
-                # Cambiar la extensión de salida para que coincida con la entrada
-                new_output = Path(output_file).with_suffix(input_ext)
-                self.output_display.setText(str(new_output))
-            elif reply == QMessageBox.StandardButton.Cancel:
-                return
+        if output_file != output_file_same_ext:
+            self.output_display.setText(output_file_same_ext)
+            self._update_display_style(self.output_display)
         
+        self.last_action_mode = 'compress'
         self.start_conversion('compress')
     
     def start_conversion(self, mode):
         input_file = self.input_display.text()
         output_file = self.output_display.text()
+        
+        # Verificación final para asegurar la extensión correcta
+        if mode == 'convert':
+            output_file = str(Path(output_file).with_suffix('.mp4'))
+        else:  # compress
+            input_ext = Path(input_file).suffix
+            output_file = str(Path(output_file).with_suffix(input_ext))
+        
+        # Actualizar la UI si cambió el nombre
+        if output_file != self.output_display.text():
+            self.output_display.setText(output_file)
+            self._update_display_style(self.output_display)
         
         self.set_ui_processing(True)
         self.status_label.setText("Procesando... Por favor espera.")
@@ -488,91 +447,54 @@ class VideoConverterApp(QMainWindow):
         self.conversion_thread.finished_signal.connect(self.conversion_finished)
         self.conversion_thread.start()
     
+    def _show_message(self, title, message, icon, button_color):
+        """Muestra un mensaje modal con estilo"""
+        msg = QMessageBox(self)
+        msg.setWindowTitle(title)
+        msg.setText(message)
+        msg.setIcon(icon)
+        msg.setStyleSheet(f"""
+            QMessageBox {{
+                background-color: #2D2D2D;
+                color: #E0E0E0;
+            }}
+            QMessageBox QLabel {{
+                color: #E0E0E0;
+            }}
+            QMessageBox QPushButton {{
+                background-color: {button_color};
+                color: white;
+                border: none;
+                padding: 8px 15px;
+                border-radius: 4px;
+                font-weight: bold;
+            }}
+            QMessageBox QPushButton:hover {{
+                background-color: #2980B9;
+            }}
+        """)
+        msg.exec()
+    
     def conversion_finished(self, success, message):
         self.set_ui_processing(False)
         
         if success:
-            msg = QMessageBox(self)
-            msg.setIcon(QMessageBox.Icon.Information)
-            msg.setWindowTitle("Éxito")
-            msg.setText(message)
-            msg.setStyleSheet("""
-                QMessageBox {
-                    background-color: #2D2D2D;
-                    color: #E0E0E0;
-                }
-                QMessageBox QLabel {
-                    color: #E0E0E0;
-                }
-                QMessageBox QPushButton {
-                    background-color: #27AE60;
-                    color: white;
-                    border: none;
-                    padding: 8px 15px;
-                    border-radius: 4px;
-                    font-weight: bold;
-                }
-                QMessageBox QPushButton:hover {
-                    background-color: #219653;
-                }
-            """)
-            msg.exec()
+            self._show_message("Éxito", message, QMessageBox.Icon.Information, "#27AE60")
             self.status_label.setText("Proceso completado exitosamente")
             self.progress_bar.setValue(100)
         else:
-            msg = QMessageBox(self)
-            msg.setIcon(QMessageBox.Icon.Critical)
-            msg.setWindowTitle("Error")
-            msg.setText(message)
-            msg.setStyleSheet("""
-                QMessageBox {
-                    background-color: #2D2D2D;
-                    color: #E0E0E0;
-                }
-                QMessageBox QLabel {
-                    color: #E0E0E0;
-                }
-                QMessageBox QPushButton {
-                    background-color: #E74C3C;
-                    color: white;
-                    border: none;
-                    padding: 8px 15px;
-                    border-radius: 4px;
-                    font-weight: bold;
-                }
-                QMessageBox QPushButton:hover {
-                    background-color: #C0392B;
-                }
-            """)
-            msg.exec()
+            self._show_message("Error", message, QMessageBox.Icon.Critical, "#E74C3C")
             self.status_label.setText("Error en el proceso")
             self.progress_bar.setValue(0)
 
 def main():
     app = QApplication(sys.argv)
-    
-    # Establecer estilo moderno
     app.setStyle('Fusion')
     
-    # Establecer estilo de aplicación con tema oscuro
+    # Estilo de aplicación con tema oscuro
     app.setStyleSheet("""
-        QMainWindow {
-            background-color: #1E1E1E;
-        }
-        QWidget {
-            background-color: #1E1E1E;
-            color: #E0E0E0;
-        }
-        QGroupBox {
-            margin-top: 10px;
-        }
-        QMessageBox {
-            background-color: #2D2D2D;
-            color: #E0E0E0;
-        }
-        QMessageBox QLabel {
-            color: #E0E0E0;
-        }
+        QMainWindow, QWidget { background-color: #1E1E1E; color: #E0E0E0; }
+        QGroupBox { margin-top: 10px; }
     """)
     
     window = VideoConverterApp()
