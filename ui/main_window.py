@@ -19,7 +19,7 @@ class ModernVideoConverterApp(QMainWindow):
         self.initUI()
 
     def initUI(self):
-        self.setWindowTitle("🎬 Video Converter Pro")
+        self.setWindowTitle("Jeel - Convertidor y Compresor de Videos")
         self.setMinimumSize(650, 500)
         central = QWidget()
         self.setCentralWidget(central)
@@ -28,11 +28,11 @@ class ModernVideoConverterApp(QMainWindow):
         layout.setSpacing(20)
 
         # Título
-        title = QLabel("🎬 Video Converter Pro")
+        title = QLabel("🎬 Jeel")
         title.setFont(QFont("Segoe UI", 20, QFont.Weight.Bold))
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
-        subtitle = QLabel("Convierte y comprime videos con calidad profesional")
+        subtitle = QLabel("Convierte y comprime videos")
         subtitle.setFont(QFont("Segoe UI", 11))
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         subtitle.setStyleSheet("color: #AAAAAA;")
