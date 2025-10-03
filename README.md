@@ -39,9 +39,9 @@ Asegúrate de que todos los siguientes comandos se ejecuten dentro de la carpeta
         ```bash
         source venv/bin/activate
         ```
-      * **Windows (PowerShell):**
-        ```powershell
-        venv\Scripts\Activate.ps1
+      * **Windows (Command Promt - CMD):**
+        ```bash
+        venv\Scripts\Activate
         ```
 3.  **Instalar las dependencias** necesarias para la aplicación:
     ```bash
