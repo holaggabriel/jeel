@@ -1,0 +1,29 @@
+# Entorno virtual
+venv/
+.env
+
+# Archivos compilados de Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Archivos temporales y logs
+*.log
+*.tmp
+*.swp
+
+# Carpetas de sistema
+.DS_Store
+Thumbs.db
+
+# Archivos generados por IDEs
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# Archivos de build/distribución
+dist/
+build/
+*.egg-info/
