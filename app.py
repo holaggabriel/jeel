@@ -20,21 +20,58 @@ class ConversionThread(QThread):
     def run(self):
         try:
             if self.mode == 'convert':
+                # CONVERTIR a MP4 (igual que antes)
                 cmd = [
                     "ffmpeg", "-i", self.input_file,
                     "-c:v", "libx264", "-crf", "18", "-preset", "slow",
                     "-c:a", "aac", "-b:a", "192k", self.output_file
                 ]
-            else:  # compress
-                cmd = [
-                    "ffmpeg", "-i", self.input_file,
-                    "-vcodec", "libx264", "-crf", "23", "-preset", "medium",
-                    "-acodec", "aac", "-b:a", "128k", self.output_file
-                ]
+            else:  # COMPRIMIR (mantener formato original)
+                # Obtener la extensión del archivo de salida
+                output_ext = Path(self.output_file).suffix.lower()
+                
+                # Configurar codecs según el formato de salida
+                if output_ext == '.mp4':
+                    cmd = [
+                        "ffmpeg", "-i", self.input_file,
+                        "-c:v", "libx264", "-crf", "23", "-preset", "medium",
+                        "-c:a", "aac", "-b:a", "128k", self.output_file
+                    ]
+                elif output_ext == '.webm':
+                    cmd = [
+                        "ffmpeg", "-i", self.input_file,
+                        "-c:v", "libvpx-vp9", "-crf", "30", "-b:v", "0",
+                        "-c:a", "libopus", "-b:a", "96k", self.output_file
+                    ]
+                elif output_ext == '.mov':
+                    cmd = [
+                        "ffmpeg", "-i", self.input_file,
+                        "-c:v", "libx264", "-crf", "23", "-preset", "medium",
+                        "-c:a", "aac", "-b:a", "128k", self.output_file
+                    ]
+                elif output_ext == '.mkv':
+                    cmd = [
+                        "ffmpeg", "-i", self.input_file,
+                        "-c:v", "libx264", "-crf", "23", "-preset", "medium",
+                        "-c:a", "aac", "-b:a", "128k", self.output_file
+                    ]
+                elif output_ext == '.avi':
+                    cmd = [
+                        "ffmpeg", "-i", self.input_file,
+                        "-c:v", "mpeg4", "-qscale:v", "5",
+                        "-c:a", "mp3", "-b:a", "128k", self.output_file
+                    ]
+                else:
+                    # Por defecto, usar H.264
+                    cmd = [
+                        "ffmpeg", "-i", self.input_file,
+                        "-c:v", "libx264", "-crf", "23", "-preset", "medium",
+                        "-c:a", "aac", "-b:a", "128k", self.output_file
+                    ]
             
             process = subprocess.Popen(cmd, stderr=subprocess.PIPE, universal_newlines=True)
             
-            # Simular progreso (en una app real podrías parsear la salida de ffmpeg)
+            # Simular progreso
             for i in range(101):
                 self.progress_updated.emit(i)
                 self.msleep(50)
@@ -44,7 +81,8 @@ class ConversionThread(QThread):
             if process.returncode == 0:
                 self.finished_signal.emit(True, f"Proceso completado exitosamente!\n{self.output_file}")
             else:
-                self.finished_signal.emit(False, "Error en la conversión")
+                error_output = process.stderr.read()
+                self.finished_signal.emit(False, f"Error en el proceso. Código: {process.returncode}\n{error_output}")
                 
         except Exception as e:
             self.finished_signal.emit(False, f"Error: {str(e)}")
@@ -105,14 +143,13 @@ class VideoConverterApp(QMainWindow):
         """)
         io_layout = QVBoxLayout(io_group)
         
-        # Entrada de video - MODIFICADO: Cambiado QLineEdit por QLabel
+        # Entrada de video
         input_layout = QHBoxLayout()
         self.input_label = QLabel("Video de entrada:")
         self.input_label.setFixedWidth(120)
         self.input_label.setFont(QFont("Segoe UI", 10))
         self.input_label.setStyleSheet("color: #CCCCCC;")
         
-        # Cambiar QLineEdit por QLabel para mostrar la ruta sin permitir edición
         self.input_display = QLabel("Selecciona un archivo de video...")
         self.input_display.setStyleSheet("""
             QLabel {
@@ -124,7 +161,7 @@ class VideoConverterApp(QMainWindow):
                 min-height: 15px;
             }
         """)
-        self.input_display.setMinimumHeight(35)  # Para que tenga la misma altura que el QLineEdit
+        self.input_display.setMinimumHeight(35)
         
         self.input_browse = QPushButton("Examinar")
         self.input_browse.setStyleSheet(self.get_button_style("#3498DB"))
@@ -135,14 +172,13 @@ class VideoConverterApp(QMainWindow):
         input_layout.addWidget(self.input_browse)
         io_layout.addLayout(input_layout)
         
-        # Salida de video - MODIFICADO: Cambiado QLineEdit por QLabel
+        # Salida de video
         output_layout = QHBoxLayout()
         self.output_label = QLabel("Video de salida:")
         self.output_label.setFixedWidth(120)
         self.output_label.setFont(QFont("Segoe UI", 10))
         self.output_label.setStyleSheet("color: #CCCCCC;")
         
-        # Cambiar QLineEdit por QLabel para mostrar la ruta sin permitir edición
         self.output_display = QLabel("Selecciona destino con 'Guardar como'...")
         self.output_display.setStyleSheet("""
             QLabel {
@@ -154,7 +190,7 @@ class VideoConverterApp(QMainWindow):
                 min-height: 15px;
             }
         """)
-        self.output_display.setMinimumHeight(35)  # Para que tenga la misma altura que el QLineEdit
+        self.output_display.setMinimumHeight(35)
         
         self.output_browse = QPushButton("Guardar como")
         self.output_browse.setStyleSheet(self.get_button_style("#3498DB"))
@@ -191,10 +227,12 @@ class VideoConverterApp(QMainWindow):
         self.convert_btn = QPushButton("🎥 Convertir a MP4")
         self.convert_btn.setStyleSheet(self.get_button_style("#2E86AB", hover="#1B6B93"))
         self.convert_btn.clicked.connect(self.convert_to_mp4)
+        self.convert_btn.setToolTip("Convierte cualquier formato de video a MP4 con alta calidad")
         
-        self.compress_btn = QPushButton("📦 Comprimir MP4")
+        self.compress_btn = QPushButton("📦 Comprimir Video")
         self.compress_btn.setStyleSheet(self.get_button_style("#28A745", hover="#1E7E34"))
-        self.compress_btn.clicked.connect(self.compress_mp4)
+        self.compress_btn.clicked.connect(self.compress_video)
+        self.compress_btn.setToolTip("Comprime el video manteniendo el mismo formato (reduce tamaño sin cambiar formato)")
         
         action_layout.addWidget(self.convert_btn)
         action_layout.addWidget(self.compress_btn)
@@ -339,7 +377,6 @@ class VideoConverterApp(QMainWindow):
             "Archivos de video (*.mp4 *.webm *.mov *.mkv *.avi);;Todos los archivos (*.*)"
         )
         if file_path:
-            # MODIFICADO: Actualizar el QLabel en lugar del QLineEdit
             self.input_display.setText(file_path)
             self.input_display.setStyleSheet("""
                 QLabel {
@@ -353,14 +390,22 @@ class VideoConverterApp(QMainWindow):
             """)
     
     def select_output_file(self):
+        input_file = self.input_display.text()
+        
+        # Si hay un archivo de entrada, sugerir la misma extensión
+        if input_file and input_file != "Selecciona un archivo de video...":
+            input_ext = Path(input_file).suffix
+            default_name = str(Path.home() / f"compressed_video{input_ext}")
+        else:
+            default_name = str(Path.home() / "converted_video.mp4")
+        
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Guardar video como",
-            str(Path.home() / "converted_video.mp4"),
-            "Archivo MP4 (*.mp4)"
+            default_name,
+            "Archivos de video (*.mp4 *.webm *.mov *.mkv *.avi);;Todos los archivos (*.*)"
         )
         if file_path:
-            # MODIFICADO: Actualizar el QLabel en lugar del QLineEdit
             self.output_display.setText(file_path)
             self.output_display.setStyleSheet("""
                 QLabel {
@@ -374,7 +419,6 @@ class VideoConverterApp(QMainWindow):
             """)
     
     def validate_inputs(self):
-        # MODIFICADO: Usar text() de los QLabel en lugar de QLineEdit
         input_file = self.input_display.text()
         output_file = self.output_display.text()
         
@@ -396,15 +440,42 @@ class VideoConverterApp(QMainWindow):
         self.progress_bar.setVisible(processing)
     
     def convert_to_mp4(self):
+        """Convierte cualquier formato de video a MP4 con alta calidad"""
         if self.validate_inputs():
             self.start_conversion('convert')
     
-    def compress_mp4(self):
-        if self.validate_inputs():
-            self.start_conversion('compress')
+    def compress_video(self):
+        """Comprime el video manteniendo el formato original"""
+        if not self.validate_inputs():
+            return
+        
+        input_file = self.input_display.text()
+        output_file = self.output_display.text()
+        
+        # Validar que los formatos de entrada y salida sean iguales
+        input_ext = Path(input_file).suffix.lower()
+        output_ext = Path(output_file).suffix.lower()
+        
+        if input_ext != output_ext:
+            reply = QMessageBox.question(
+                self, 
+                "Confirmar compresión", 
+                f"Estás cambiando el formato de {input_ext} a {output_ext}. "
+                f"¿Deseas comprimir manteniendo el formato original ({input_ext})?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Yes
+            )
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                # Cambiar la extensión de salida para que coincida con la entrada
+                new_output = Path(output_file).with_suffix(input_ext)
+                self.output_display.setText(str(new_output))
+            elif reply == QMessageBox.StandardButton.Cancel:
+                return
+        
+        self.start_conversion('compress')
     
     def start_conversion(self, mode):
-        # MODIFICADO: Obtener las rutas de los QLabel
         input_file = self.input_display.text()
         output_file = self.output_display.text()
         
