@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import QThread, pyqtSignal, Qt
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QComboBox
+from widgets.my_button import MyButton
 
 # --- Excepciones personalizadas ---
 class FFmpegNotFoundError(Exception):
@@ -296,17 +297,21 @@ class ModernVideoConverterApp(QMainWindow):
         quality_layout.addStretch()
         layout.addLayout(quality_layout)
 
-        # Botones acción
+        # Botones acción (usando CustomButton)
         action_layout = QHBoxLayout()
         layout.addLayout(action_layout)
-        self.convert_btn = QPushButton("🔄 Convertir a MP4")
-        self.compress_btn = QPushButton("📦 Comprimir")
-        self.cancel_btn = QPushButton("❌ Cancelar")
-        for btn, color in [(self.convert_btn, "#3498DB"), (self.compress_btn, "#27AE60"), (self.cancel_btn, "#E74C3C")]:
-            btn.setStyleSheet(self._btn_style(color))
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            action_layout.addWidget(btn)
+
+        self.convert_btn = MyButton("🔄 Convertir a MP4", "#3498DB", "#FFFFFF")
+        self.compress_btn = MyButton("📦 Comprimir", "#27AE60", "#FFFFFF")
+        self.cancel_btn = MyButton("❌ Cancelar", "#E74C3C", "#FFFFFF")
+
+        action_layout.addWidget(self.convert_btn)
+        action_layout.addWidget(self.compress_btn)
+        action_layout.addWidget(self.cancel_btn)
+
         self.cancel_btn.setVisible(False)
+
+        # Conexiones
         self.convert_btn.clicked.connect(self.convert_to_mp4)
         self.compress_btn.clicked.connect(self.compress_video)
         self.cancel_btn.clicked.connect(self.cancel_conversion)
@@ -341,6 +346,7 @@ class ModernVideoConverterApp(QMainWindow):
         label = QLabel(label_text)
         label.setFont(QFont("Segoe UI", 10))
         label.setStyleSheet("color: #DDDDDD;")
+        
         display = QLabel("Selecciona un archivo..." if not save else "Selecciona destino...")
         display.setStyleSheet("""
             QLabel {
@@ -349,29 +355,15 @@ class ModernVideoConverterApp(QMainWindow):
             }
         """)
         display.setMinimumHeight(35)
-        btn = QPushButton("Examinar" if not save else "Guardar como")
-        btn.setStyleSheet(self._btn_style("#555555"))
-        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        # Aquí ya usamos tu botón personalizado
+        btn = MyButton("Examinar" if not save else "Guardar como", "#555555", "#FFFFFF")
+
         layout.addWidget(label)
         layout.addWidget(display, 1)
         layout.addWidget(btn)
         parent_layout.addLayout(layout)
         return display, btn
-
-    def _btn_style(self, color):
-        return f"""
-            QPushButton {{
-                background-color: {color};
-                color: white;
-                border: none;
-                padding: 8px 15px;
-                border-radius: 6px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: #555555;
-            }}
-        """
 
     # --- Funciones de selección ---
     def select_input_file(self):
