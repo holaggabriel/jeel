@@ -1,17 +1,20 @@
 import sys
 from pathlib import Path
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QPushButton, QFileDialog, QMessageBox, QProgressBar
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QFileDialog, QMessageBox, QProgressBar
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QComboBox
 
-from widgets.my_button import MyButton
+from ui.widgets.my_button import MyButton
 from core.converter import ConversionThread
+from ui.dialogs.about_dialog import AboutDialog
+from ui.widgets.info_button import InfoButton 
 
 class ModernVideoConverterApp(QMainWindow):
+    
     def __init__(self):
         super().__init__()
         self.conversion_thread = None
@@ -24,7 +27,7 @@ class ModernVideoConverterApp(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
-        layout.setContentsMargins(25, 25, 25, 25)
+        layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(20)
 
         # Título
@@ -112,7 +115,21 @@ class ModernVideoConverterApp(QMainWindow):
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.status_label.setStyleSheet("color: #AAAAAA; font-style: italic;")
         layout.addWidget(self.status_label)
-
+        
+        # Botón de información
+        self.info_button = InfoButton(self)
+        self.info_button.clicked.connect(self.show_about_dialog)
+        # Posicionar el botón
+        bottom_layout = QHBoxLayout()
+        bottom_layout.addStretch()  # Esto empuja el botón a la derecha
+        bottom_layout.addWidget(self.info_button)
+        layout.addLayout(bottom_layout)
+    
+    def show_about_dialog(self):
+        """Muestra el diálogo de información"""
+        dialog = AboutDialog(self)
+        dialog.exec()
+    
     def _file_row(self, label_text, parent_layout, save=False):
         layout = QHBoxLayout()
         label = QLabel(label_text)
@@ -135,6 +152,7 @@ class ModernVideoConverterApp(QMainWindow):
         layout.addWidget(display, 1)
         layout.addWidget(btn)
         parent_layout.addLayout(layout)
+        
         return display, btn
 
     # --- Funciones de selección ---
