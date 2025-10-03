@@ -105,65 +105,63 @@ class VideoConverterApp(QMainWindow):
         """)
         io_layout = QVBoxLayout(io_group)
         
-        # Entrada de video
+        # Entrada de video - MODIFICADO: Cambiado QLineEdit por QLabel
         input_layout = QHBoxLayout()
         self.input_label = QLabel("Video de entrada:")
         self.input_label.setFixedWidth(120)
         self.input_label.setFont(QFont("Segoe UI", 10))
         self.input_label.setStyleSheet("color: #CCCCCC;")
         
-        self.input_entry = QLineEdit()
-        self.input_entry.setPlaceholderText("Selecciona un archivo de video...")
-        self.input_entry.setStyleSheet("""
-            QLineEdit {
+        # Cambiar QLineEdit por QLabel para mostrar la ruta sin permitir edición
+        self.input_display = QLabel("Selecciona un archivo de video...")
+        self.input_display.setStyleSheet("""
+            QLabel {
                 padding: 8px;
                 background-color: #404040;
-                color: #E0E0E0;
+                color: #888888;
                 border: 1px solid #555555;
                 border-radius: 4px;
-            }
-            QLineEdit:focus {
-                border: 1px solid #3498DB;
+                min-height: 15px;
             }
         """)
+        self.input_display.setMinimumHeight(35)  # Para que tenga la misma altura que el QLineEdit
         
         self.input_browse = QPushButton("Examinar")
         self.input_browse.setStyleSheet(self.get_button_style("#3498DB"))
         self.input_browse.clicked.connect(self.select_input_file)
         
         input_layout.addWidget(self.input_label)
-        input_layout.addWidget(self.input_entry)
+        input_layout.addWidget(self.input_display)
         input_layout.addWidget(self.input_browse)
         io_layout.addLayout(input_layout)
         
-        # Salida de video
+        # Salida de video - MODIFICADO: Cambiado QLineEdit por QLabel
         output_layout = QHBoxLayout()
         self.output_label = QLabel("Video de salida:")
         self.output_label.setFixedWidth(120)
         self.output_label.setFont(QFont("Segoe UI", 10))
         self.output_label.setStyleSheet("color: #CCCCCC;")
         
-        self.output_entry = QLineEdit()
-        self.output_entry.setPlaceholderText("Especifica donde guardar el resultado...")
-        self.output_entry.setStyleSheet("""
-            QLineEdit {
+        # Cambiar QLineEdit por QLabel para mostrar la ruta sin permitir edición
+        self.output_display = QLabel("Selecciona destino con 'Guardar como'...")
+        self.output_display.setStyleSheet("""
+            QLabel {
                 padding: 8px;
                 background-color: #404040;
-                color: #E0E0E0;
+                color: #888888;
                 border: 1px solid #555555;
                 border-radius: 4px;
-            }
-            QLineEdit:focus {
-                border: 1px solid #3498DB;
+                min-height: 15px;
             }
         """)
+        self.output_display.setMinimumHeight(35)  # Para que tenga la misma altura que el QLineEdit
         
         self.output_browse = QPushButton("Guardar como")
         self.output_browse.setStyleSheet(self.get_button_style("#3498DB"))
         self.output_browse.clicked.connect(self.select_output_file)
         
         output_layout.addWidget(self.output_label)
-        output_layout.addWidget(self.output_entry)
+        output_layout.addWidget(self.output_display)
         output_layout.addWidget(self.output_browse)
         io_layout.addLayout(output_layout)
         
@@ -341,7 +339,18 @@ class VideoConverterApp(QMainWindow):
             "Archivos de video (*.mp4 *.webm *.mov *.mkv *.avi);;Todos los archivos (*.*)"
         )
         if file_path:
-            self.input_entry.setText(file_path)
+            # MODIFICADO: Actualizar el QLabel en lugar del QLineEdit
+            self.input_display.setText(file_path)
+            self.input_display.setStyleSheet("""
+                QLabel {
+                    padding: 8px;
+                    background-color: #404040;
+                    color: #E0E0E0;
+                    border: 1px solid #555555;
+                    border-radius: 4px;
+                    min-height: 15px;
+                }
+            """)
     
     def select_output_file(self):
         file_path, _ = QFileDialog.getSaveFileName(
@@ -351,13 +360,25 @@ class VideoConverterApp(QMainWindow):
             "Archivo MP4 (*.mp4)"
         )
         if file_path:
-            self.output_entry.setText(file_path)
+            # MODIFICADO: Actualizar el QLabel en lugar del QLineEdit
+            self.output_display.setText(file_path)
+            self.output_display.setStyleSheet("""
+                QLabel {
+                    padding: 8px;
+                    background-color: #404040;
+                    color: #E0E0E0;
+                    border: 1px solid #555555;
+                    border-radius: 4px;
+                    min-height: 15px;
+                }
+            """)
     
     def validate_inputs(self):
-        input_file = self.input_entry.text()
-        output_file = self.output_entry.text()
+        # MODIFICADO: Usar text() de los QLabel en lugar de QLineEdit
+        input_file = self.input_display.text()
+        output_file = self.output_display.text()
         
-        if not input_file or not output_file:
+        if not input_file or input_file == "Selecciona un archivo de video..." or not output_file or output_file == "Selecciona destino con 'Guardar como'...":
             QMessageBox.warning(self, "Advertencia", "Selecciona el video de entrada y salida")
             return False
         
@@ -383,8 +404,9 @@ class VideoConverterApp(QMainWindow):
             self.start_conversion('compress')
     
     def start_conversion(self, mode):
-        input_file = self.input_entry.text()
-        output_file = self.output_entry.text()
+        # MODIFICADO: Obtener las rutas de los QLabel
+        input_file = self.input_display.text()
+        output_file = self.output_display.text()
         
         self.set_ui_processing(True)
         self.status_label.setText("Procesando... Por favor espera.")
