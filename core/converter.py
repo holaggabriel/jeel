@@ -35,10 +35,6 @@ class ConversionThread(QThread):
             self.input_file = str(Path(self.input_file).resolve().as_posix())
             self.output_file = str(Path(self.output_file).resolve().as_posix())
 
-            # Log para verificar rutas
-            print("Resolved input file:", self.input_file)
-            print("Resolved output file:", self.output_file)
-
             # Construir comando FFmpeg con rutas normalizadas
             cmd = get_ffmpeg_command(self.input_file, self.output_file, self.mode, self.quality_preset)
 
