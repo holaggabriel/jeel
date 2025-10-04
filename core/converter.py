@@ -37,10 +37,12 @@ class ConversionThread(QThread):
 
             # Ejecutar conversión
             self._ffmpeg_process = subprocess.Popen(
-                cmd, 
-                stderr=subprocess.PIPE, 
-                stdout=subprocess.PIPE, 
-                universal_newlines=True,
+                cmd,
+                stderr=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                text=True,           
+                encoding="utf-8",   
+                errors="replace",    
                 bufsize=1
             )
             

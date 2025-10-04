@@ -1,4 +1,3 @@
-import sys
 from pathlib import Path
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -11,7 +10,8 @@ from PyQt6.QtWidgets import QComboBox
 from ui.widgets.my_button import MyButton
 from core.converter import ConversionThread
 from ui.dialogs.about_dialog import AboutDialog
-from ui.widgets.info_button import InfoButton 
+from ui.widgets.info_button import InfoButton
+from utils.is_filename_problematic import is_filename_problematic
 
 class ModernVideoConverterApp(QMainWindow):
     
@@ -200,23 +200,45 @@ class ModernVideoConverterApp(QMainWindow):
 
     # --- Conversión ---
     def convert_to_mp4(self):
-        if not self.validate_inputs(): return
+        if not self.validate_inputs():
+            return
+        
+        input_file = self.input_display.text()
+        if is_filename_problematic(input_file):
+            QMessageBox.warning(
+                self,
+                "Nombre de archivo potencialmente problemático",
+                ("El nombre del archivo de entrada contiene caracteres especiales, emojis o es muy largo. Esto puede causar errores.\n"
+                "Se recomienda cambiarlo a un nombre más corto y sencillo antes de continuar.")
+            )
+            return  # detener la conversión hasta que el usuario cambie el nombre
+
         self.last_action_mode = 'convert'
         output_file = str(Path(self.output_display.text()).with_suffix('.mp4'))
         self.output_display.setText(output_file)
         
-        # Mostrar información sobre el modo de conversión
         self.status_label.setText("Convirtiendo a MP4 (sin compresión)...")
         self.start_conversion('convert')
 
     def compress_video(self):
-        if not self.validate_inputs(): return
+        if not self.validate_inputs():
+            return
+
+        input_file = self.input_display.text()
+        if is_filename_problematic(input_file):
+            QMessageBox.warning(
+                self,
+                "Nombre de archivo potencialmente problemático",
+                ("El nombre del archivo de entrada contiene caracteres especiales, emojis o es muy largo. Esto puede causar errores.\n"
+                "Se recomienda cambiarlo a un nombre más corto y sencillo antes de continuar.")
+            )
+            return
+
         self.last_action_mode = 'compress'
         input_ext = Path(self.input_display.text()).suffix
         output_file = str(Path(self.output_display.text()).with_suffix(input_ext))
         self.output_display.setText(output_file)
-        
-        # Mostrar calidad seleccionada
+
         calidad = self.quality_combo.currentText()
         self.status_label.setText(f"Comprimiendo con calidad: {calidad}...")
         self.start_conversion('compress')
