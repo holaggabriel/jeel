@@ -184,19 +184,23 @@ class ModernVideoConverterApp(QMainWindow):
         return True
 
     def set_ui_processing(self, processing):
+        """Configura la interfaz según si se está procesando o no"""
         self.convert_btn.setVisible(not processing)
         self.compress_btn.setVisible(not processing)
         self.cancel_btn.setVisible(processing)
+        
         self.input_btn.setDisabled(processing)
         self.output_btn.setDisabled(processing)
+        self.quality_combo.setDisabled(processing)
+        
         self.progress_bar.setVisible(processing)
 
+
     def cancel_conversion(self):
+        """Cancela la conversión en curso"""
         if self.conversion_thread and self.conversion_thread.isRunning():
             self.conversion_thread.stop()
             self.status_label.setText("Cancelando conversión...")
-            self.convert_btn.setEnabled(False)
-            self.compress_btn.setEnabled(False)
 
     # --- Conversión ---
     def convert_to_mp4(self):
@@ -273,14 +277,20 @@ class ModernVideoConverterApp(QMainWindow):
         self.conversion_thread.finished_signal.connect(self.conversion_finished)
         self.conversion_thread.start()
 
+
     def conversion_finished(self, success, message):
+        """Se ejecuta cuando termina la conversión, incluso si se canceló"""
+        # Restaurar UI
         self.set_ui_processing(False)
+
         if success:
             QMessageBox.information(self, "Éxito", message)
             self.status_label.setText("Proceso completado exitosamente")
             self.progress_bar.setValue(100)
         else:
-            if "cancelada" not in message.lower():
+            if "cancelada" in message.lower():
+                self.status_label.setText("Conversión cancelada")
+            else:
                 QMessageBox.critical(self, "Error", message)
-            self.status_label.setText("Listo para convertir videos")
+                self.status_label.setText("Listo para convertir videos")
             self.progress_bar.setValue(0)
