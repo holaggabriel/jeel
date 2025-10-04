@@ -6,6 +6,7 @@ from .ffmpeg_utils import (
     get_ffmpeg_command, get_video_duration, parse_progress
 )
 from .exceptions import ConversionError
+from pathlib import Path
 
 class ConversionThread(QThread):
     progress_updated = pyqtSignal(int)
@@ -30,8 +31,17 @@ class ConversionThread(QThread):
             input_size = os.path.getsize(self.input_file)
             check_disk_space(self.output_file, input_size * 2)
 
+            # Normalizar rutas para Windows/Linux
+            self.input_file = str(Path(self.input_file).resolve().as_posix())
+            self.output_file = str(Path(self.output_file).resolve().as_posix())
+
+            # Log para verificar rutas
+            print("Resolved input file:", self.input_file)
+            print("Resolved output file:", self.output_file)
+
+            # Construir comando FFmpeg con rutas normalizadas
             cmd = get_ffmpeg_command(self.input_file, self.output_file, self.mode, self.quality_preset)
-            
+
             # Obtener duración total del video
             total_duration = get_video_duration(self.input_file)
 
@@ -70,7 +80,7 @@ class ConversionThread(QThread):
         except Exception as e:
             error_message = str(e)
             self.finished_signal.emit(False, error_message)
-
+    
     def stop(self):
         """Detiene la conversión de manera segura"""
         self._is_running = False
